@@ -1650,7 +1650,7 @@ impl<'a> ObjectBuilder<'a> {
         let starting_offset = self.parent_state.saved_value_builder_offset();
         let value_builder = self.parent_state.value_builder();
         let current_offset = value_builder.offset();
-        // Current object starts from `object_start_offset`
+        // Current object starts from `starting_offset`
         let data_size = current_offset - starting_offset;
         let offset_size = int_size(data_size);
 
@@ -1662,11 +1662,15 @@ impl<'a> ObjectBuilder<'a> {
             (num_fields * id_size as usize) + // field IDs
             ((num_fields + 1) * offset_size as usize); // field offsets + data_size
 
-        // Shift existing data to make room for the header
-        value_builder.inner_mut().splice(
-            starting_offset..starting_offset,
-            std::iter::repeat_n(0u8, header_size),
-        );
+        let inner_buf = value_builder.inner_mut();
+
+        // Reserve the required space upfront to minimize reallocations during splice
+        inner_buf.reserve(header_size);
+
+        // Pre-allocate header space with zeros - this is more efficient than repeat_n
+        let header_placeholder = vec![0u8; header_size];
+
+        inner_buf.splice(starting_offset..starting_offset, header_placeholder);
 
         // Write header at the original start position
         let mut header_pos = starting_offset;
