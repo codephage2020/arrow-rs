@@ -143,7 +143,7 @@ pub(crate) fn cast_fixed_size_list_to_list_view<OffsetSize: OffsetSizeTrait>(
 /// Cast list to fixed size list array. If any inner list size does not match the
 /// size of the output fixed size list array, depending on `cast_options` we either
 /// output `NULL` for that element (safe) or raise an error.
-pub(crate) fn cast_list_to_fixed_size_list<OffsetSize>(
+pub(crate) fn cast_list_to_fixed_size_list<OffsetSize, I>(
     array: &dyn Array,
     field: &FieldRef,
     size: i32,
@@ -151,108 +151,66 @@ pub(crate) fn cast_list_to_fixed_size_list<OffsetSize>(
 ) -> Result<ArrayRef, ArrowError>
 where
     OffsetSize: OffsetSizeTrait,
+    I: ArrowPrimitiveType,
+    I::Native: OffsetSizeTrait,
 {
     let array = array.as_list::<OffsetSize>();
 
-    let cap = array.len() * size as usize;
+    // Quick path: if all lists have correct length and there are no nulls, just slice
+    let offsets = array.offsets();
+    let mut all_correct_length = true;
 
-    let mut null_builder = NullBufferBuilder::new(array.len());
-    if let Some(nulls) = array.nulls().filter(|b| b.null_count() > 0) {
-        null_builder.append_buffer(nulls);
-    } else {
-        null_builder.append_n_non_nulls(array.len());
-    }
-
-    // Whether the resulting array may contain null lists
-    let nullable = cast_options.safe || array.null_count() != 0;
-    // Nulls in FixedSizeListArray take up space and so we must pad the values
-    let values = array.values().to_data();
-    let mut mutable = MutableArrayData::new(vec![&values], nullable, cap);
-    // The end position in values of the last incorrectly-sized list slice
-    let mut last_pos = 0;
-
-    // Need to flag when previous vector(s) are empty/None to distinguish from 'All slices were correct length' cases.
-    let is_prev_empty = if array.offsets().len() < 2 {
-        false
-    } else {
-        let first_offset = array.offsets()[0].as_usize();
-        let second_offset = array.offsets()[1].as_usize();
-
-        first_offset == 0 && second_offset == 0
-    };
-
-    for (idx, w) in array.offsets().windows(2).enumerate() {
+    for (idx, w) in offsets.windows(2).enumerate() {
         let start_pos = w[0].as_usize();
         let end_pos = w[1].as_usize();
         let len = end_pos - start_pos;
 
         if len != size as usize {
             if cast_options.safe || array.is_null(idx) {
-                if last_pos != start_pos {
-                    // Extend with valid slices
-                    mutable.extend(0, last_pos, start_pos);
-                }
-                // Pad this slice with nulls
-                mutable.extend_nulls(size as _);
-                null_builder.set_bit(idx, false);
-                // Set last_pos to the end of this slice's values
-                last_pos = end_pos
+                // Element will be handled later
             } else {
                 return Err(ArrowError::CastError(format!(
                     "Cannot cast to FixedSizeList({size}): value at index {idx} has length {len}",
                 )));
             }
+            all_correct_length = false;
         }
     }
 
-    let values = match last_pos {
-        0 if !is_prev_empty => array.values().slice(0, cap), // All slices were the correct length
-        _ => {
-            if mutable.len() != cap {
-                // Remaining slices were all correct length
-                let remaining = cap - mutable.len();
-                mutable.extend(0, last_pos, last_pos + remaining)
-            }
-            make_array(mutable.freeze())
-        }
-    };
+    // If all lists have correct length and no special handling needed, use slice
+    if all_correct_length && array.null_count() == 0 {
+        let cap = array.len() * size as usize;
+        let values = array.values().slice(0, cap);
+        let values = cast_with_options(values.as_ref(), field.data_type(), cast_options)?;
+        return Ok(Arc::new(FixedSizeListArray::try_new(
+            field.clone(),
+            size,
+            values,
+            None,
+        )?));
+    }
 
-    // Cast the inner values if necessary
-    let values = cast_with_options(values.as_ref(), field.data_type(), cast_options)?;
-
-    let array = FixedSizeListArray::try_new(field.clone(), size, values, null_builder.build())?;
-    Ok(Arc::new(array))
-}
-
-/// Same as [`cast_list_to_fixed_size_list`] but for list view arrays.
-pub(crate) fn cast_list_view_to_fixed_size_list<O: OffsetSizeTrait>(
-    array: &dyn Array,
-    field: &FieldRef,
-    size: i32,
-    cast_options: &CastOptions,
-) -> Result<ArrayRef, ArrowError> {
-    let array = array.as_list_view::<O>();
-
+    // Build take indices and null buffer
+    let mut take_indices: Vec<Option<I::Native>> = Vec::with_capacity(array.len() * size as usize);
     let mut null_builder = NullBufferBuilder::new(array.len());
+
     if let Some(nulls) = array.nulls().filter(|b| b.null_count() > 0) {
         null_builder.append_buffer(nulls);
     } else {
         null_builder.append_n_non_nulls(array.len());
     }
 
-    let nullable = cast_options.safe || array.null_count() != 0;
-    let values = array.values().to_data();
-    let cap = array.len() * size as usize;
-    let mut mutable = MutableArrayData::new(vec![&values], nullable, cap);
-
-    for idx in 0..array.len() {
-        let offset = array.value_offset(idx).as_usize();
-        let len = array.value_size(idx).as_usize();
+    for (idx, w) in offsets.windows(2).enumerate() {
+        let start_pos = w[0].as_usize();
+        let end_pos = w[1].as_usize();
+        let len = end_pos - start_pos;
 
         if len != size as usize {
-            // Nulls in FixedSizeListArray take up space and so we must pad the values
+            // Length mismatch: fill with nulls
             if cast_options.safe || array.is_null(idx) {
-                mutable.extend_nulls(size as _);
+                for _ in 0..size {
+                    take_indices.push(None); // Null index will produce null value
+                }
                 null_builder.set_bit(idx, false);
             } else {
                 return Err(ArrowError::CastError(format!(
@@ -260,15 +218,87 @@ pub(crate) fn cast_list_view_to_fixed_size_list<O: OffsetSizeTrait>(
                 )));
             }
         } else {
-            mutable.extend(0, offset, offset + len);
+            // Length matches: add all value indices
+            for value_idx in start_pos..end_pos {
+                take_indices.push(Some(I::Native::usize_as(value_idx)));
+            }
         }
     }
 
-    let values = make_array(mutable.freeze());
-    let values = cast_with_options(values.as_ref(), field.data_type(), cast_options)?;
+    // Take values at the computed indices
+    let take_indices = PrimitiveArray::<I>::from_iter(take_indices);
+    let values = take(array.values(), &take_indices, None)?;
+    let values = cast_with_options(&values, field.data_type(), cast_options)?;
 
-    let array = FixedSizeListArray::try_new(field.clone(), size, values, null_builder.build())?;
-    Ok(Arc::new(array))
+    Ok(Arc::new(FixedSizeListArray::try_new(
+        field.clone(),
+        size,
+        values,
+        null_builder.build(),
+    )?))
+}
+
+/// Same as [`cast_list_to_fixed_size_list`] but for list view arrays.
+pub(crate) fn cast_list_view_to_fixed_size_list<O, I>(
+    array: &dyn Array,
+    field: &FieldRef,
+    size: i32,
+    cast_options: &CastOptions,
+) -> Result<ArrayRef, ArrowError>
+where
+    O: OffsetSizeTrait,
+    I: ArrowPrimitiveType,
+    I::Native: OffsetSizeTrait,
+{
+    let array = array.as_list_view::<O>();
+    let list_view_offsets = array.offsets();
+    let sizes = array.sizes();
+
+    // Build take indices and null buffer
+    let mut take_indices: Vec<Option<I::Native>> = Vec::with_capacity(array.len() * size as usize);
+    let mut null_builder = NullBufferBuilder::new(array.len());
+
+    if let Some(nulls) = array.nulls().filter(|b| b.null_count() > 0) {
+        null_builder.append_buffer(nulls);
+    } else {
+        null_builder.append_n_non_nulls(array.len());
+    }
+
+    for idx in 0..array.len() {
+        let offset = list_view_offsets[idx].as_usize();
+        let len = sizes[idx].as_usize();
+
+        if len != size as usize {
+            // Length mismatch: fill with nulls
+            if cast_options.safe || array.is_null(idx) {
+                for _ in 0..size {
+                    take_indices.push(None); // Null index will produce null value
+                }
+                null_builder.set_bit(idx, false);
+            } else {
+                return Err(ArrowError::CastError(format!(
+                    "Cannot cast to FixedSizeList({size}): value at index {idx} has length {len}",
+                )));
+            }
+        } else {
+            // Length matches: add all value indices
+            for value_idx in offset..offset + len {
+                take_indices.push(Some(I::Native::usize_as(value_idx)));
+            }
+        }
+    }
+
+    // Take values at the computed indices
+    let take_indices = PrimitiveArray::<I>::from_iter(take_indices);
+    let values = take(array.values(), &take_indices, None)?;
+    let values = cast_with_options(&values, field.data_type(), cast_options)?;
+
+    Ok(Arc::new(FixedSizeListArray::try_new(
+        field.clone(),
+        size,
+        values,
+        null_builder.build(),
+    )?))
 }
 
 /// Casting between list arrays of same offset size; we cast only the inner type.

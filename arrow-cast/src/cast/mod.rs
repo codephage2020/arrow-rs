@@ -65,7 +65,6 @@ use crate::parse::{
 use arrow_array::{builder::*, cast::*, temporal_conversions::*, timezone::Tz, types::*, *};
 use arrow_buffer::{ArrowNativeType, OffsetBuffer, i256};
 use arrow_data::ArrayData;
-use arrow_data::transform::MutableArrayData;
 use arrow_schema::*;
 use arrow_select::take::take;
 use num_traits::{NumCast, ToPrimitive, cast::AsPrimitive};
@@ -833,7 +832,7 @@ pub fn cast_with_options(
         // List
         (List(_), LargeList(list_to)) => cast_list::<i32, i64>(array, list_to, cast_options),
         (List(_), FixedSizeList(field, size)) => {
-            cast_list_to_fixed_size_list::<i32>(array, field, *size, cast_options)
+            cast_list_to_fixed_size_list::<i32, Int32Type>(array, field, *size, cast_options)
         }
         (List(_), ListView(list_to)) => {
             cast_list_to_list_view::<i32, i32>(array, list_to, cast_options)
@@ -844,7 +843,7 @@ pub fn cast_with_options(
         // LargeList
         (LargeList(_), List(list_to)) => cast_list::<i64, i32>(array, list_to, cast_options),
         (LargeList(_), FixedSizeList(field, size)) => {
-            cast_list_to_fixed_size_list::<i64>(array, field, *size, cast_options)
+            cast_list_to_fixed_size_list::<i64, Int64Type>(array, field, *size, cast_options)
         }
         (LargeList(_), ListView(list_to)) => {
             cast_list_to_list_view::<i64, i32>(array, list_to, cast_options)
@@ -863,7 +862,7 @@ pub fn cast_with_options(
             cast_list_view::<i32, i64>(array, list_to, cast_options)
         }
         (ListView(_), FixedSizeList(field, size)) => {
-            cast_list_view_to_fixed_size_list::<i32>(array, field, *size, cast_options)
+            cast_list_view_to_fixed_size_list::<i32, Int32Type>(array, field, *size, cast_options)
         }
         // LargeListView
         (LargeListView(_), LargeList(list_to)) => {
@@ -876,7 +875,7 @@ pub fn cast_with_options(
             cast_list_view::<i64, i32>(array, list_to, cast_options)
         }
         (LargeListView(_), FixedSizeList(field, size)) => {
-            cast_list_view_to_fixed_size_list::<i64>(array, field, *size, cast_options)
+            cast_list_view_to_fixed_size_list::<i64, Int64Type>(array, field, *size, cast_options)
         }
         // FixedSizeList
         (FixedSizeList(_, _), List(list_to)) => {
