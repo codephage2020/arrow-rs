@@ -155,20 +155,17 @@ where
     I::Native: OffsetSizeTrait,
 {
     let array = array.as_list::<OffsetSize>();
-
-    // Quick path: if all lists have correct length and there are no nulls, just slice
     let offsets = array.offsets();
+    let values = array.values();
+    let size_usize = size as usize;
+
+    // Single pass: check lengths and prepare for quick path
     let mut all_correct_length = true;
 
     for (idx, w) in offsets.windows(2).enumerate() {
-        let start_pos = w[0].as_usize();
-        let end_pos = w[1].as_usize();
-        let len = end_pos - start_pos;
-
-        if len != size as usize {
-            if cast_options.safe || array.is_null(idx) {
-                // Element will be handled later
-            } else {
+        let len = w[1].as_usize() - w[0].as_usize();
+        if len != size_usize {
+            if !cast_options.safe && !array.is_null(idx) {
                 return Err(ArrowError::CastError(format!(
                     "Cannot cast to FixedSizeList({size}): value at index {idx} has length {len}",
                 )));
@@ -177,10 +174,10 @@ where
         }
     }
 
-    // If all lists have correct length and no special handling needed, use slice
+    // Quick path: if all lists have correct length and there are no nulls, just slice
     if all_correct_length && array.null_count() == 0 {
-        let cap = array.len() * size as usize;
-        let values = array.values().slice(0, cap);
+        let cap = array.len() * size_usize;
+        let values = values.slice(0, cap);
         let values = cast_with_options(values.as_ref(), field.data_type(), cast_options)?;
         return Ok(Arc::new(FixedSizeListArray::try_new(
             field.clone(),
@@ -190,8 +187,9 @@ where
         )?));
     }
 
-    // Build take indices and null buffer
-    let mut take_indices: Vec<Option<I::Native>> = Vec::with_capacity(array.len() * size as usize);
+    // Build take indices and null buffer efficiently
+    let total_indices = array.len() * size_usize;
+    let mut take_indices = Vec::with_capacity(total_indices);
     let mut null_builder = NullBufferBuilder::new(array.len());
 
     if let Some(nulls) = array.nulls().filter(|b| b.null_count() > 0) {
@@ -200,34 +198,26 @@ where
         null_builder.append_n_non_nulls(array.len());
     }
 
+    // Single pass: build take indices
     for (idx, w) in offsets.windows(2).enumerate() {
         let start_pos = w[0].as_usize();
         let end_pos = w[1].as_usize();
         let len = end_pos - start_pos;
 
-        if len != size as usize {
-            // Length mismatch: fill with nulls
-            if cast_options.safe || array.is_null(idx) {
-                for _ in 0..size {
-                    take_indices.push(None); // Null index will produce null value
-                }
-                null_builder.set_bit(idx, false);
-            } else {
-                return Err(ArrowError::CastError(format!(
-                    "Cannot cast to FixedSizeList({size}): value at index {idx} has length {len}",
-                )));
-            }
+        if len != size_usize {
+            // Length mismatch: fill with nulls and mark as null
+            take_indices.resize(take_indices.len() + size_usize, None);
+            null_builder.set_bit(idx, false);
         } else {
-            // Length matches: add all value indices
-            for value_idx in start_pos..end_pos {
-                take_indices.push(Some(I::Native::usize_as(value_idx)));
-            }
+            // Length matches: extend with value indices efficiently
+            take_indices
+                .extend((start_pos..end_pos).map(|value_idx| Some(I::Native::usize_as(value_idx))));
         }
     }
 
     // Take values at the computed indices
     let take_indices = PrimitiveArray::<I>::from_iter(take_indices);
-    let values = take(array.values(), &take_indices, None)?;
+    let values = take(values, &take_indices, None)?;
     let values = cast_with_options(&values, field.data_type(), cast_options)?;
 
     Ok(Arc::new(FixedSizeListArray::try_new(
