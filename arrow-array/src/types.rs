@@ -324,6 +324,7 @@ pub trait ArrowTimestampType: ArrowTemporalType<Native = i64> {
     /// Creates a ArrowTimestampType::Native from the provided [`NaiveDateTime`]
     ///
     /// See [`DataType::Timestamp`] for more information on timezone handling
+    #[deprecated(since = "59.0.0", note = "Use from_naive_datetime instead")]
     fn make_value(naive: NaiveDateTime) -> Option<i64>;
 
     /// Creates a timestamp value from a [`DateTime`] in any timezone.
@@ -350,7 +351,7 @@ pub trait ArrowTimestampType: ArrowTemporalType<Native = i64> {
                 chrono::offset::LocalResult::Ambiguous(dt1, _) => Self::from_datetime(dt1),
                 chrono::offset::LocalResult::None => None,
             },
-            None => Self::make_value(naive),
+            None => Self::from_datetime(naive.and_utc()),
         }
     }
 }
@@ -358,6 +359,7 @@ pub trait ArrowTimestampType: ArrowTemporalType<Native = i64> {
 impl ArrowTimestampType for TimestampSecondType {
     const UNIT: TimeUnit = TimeUnit::Second;
 
+    #[allow(deprecated)]
     fn make_value(naive: NaiveDateTime) -> Option<i64> {
         Some(naive.and_utc().timestamp())
     }
@@ -369,6 +371,7 @@ impl ArrowTimestampType for TimestampSecondType {
 impl ArrowTimestampType for TimestampMillisecondType {
     const UNIT: TimeUnit = TimeUnit::Millisecond;
 
+    #[allow(deprecated)]
     fn make_value(naive: NaiveDateTime) -> Option<i64> {
         let utc = naive.and_utc();
         let millis = utc.timestamp().checked_mul(1_000)?;
@@ -383,6 +386,7 @@ impl ArrowTimestampType for TimestampMillisecondType {
 impl ArrowTimestampType for TimestampMicrosecondType {
     const UNIT: TimeUnit = TimeUnit::Microsecond;
 
+    #[allow(deprecated)]
     fn make_value(naive: NaiveDateTime) -> Option<i64> {
         let utc = naive.and_utc();
         let micros = utc.timestamp().checked_mul(1_000_000)?;
@@ -397,6 +401,7 @@ impl ArrowTimestampType for TimestampMicrosecondType {
 impl ArrowTimestampType for TimestampNanosecondType {
     const UNIT: TimeUnit = TimeUnit::Nanosecond;
 
+    #[allow(deprecated)]
     fn make_value(naive: NaiveDateTime) -> Option<i64> {
         let utc = naive.and_utc();
         let nanos = utc.timestamp().checked_mul(1_000_000_000)?;
@@ -417,7 +422,7 @@ fn add_year_months<T: ArrowTimestampType>(
     let res = as_datetime_with_timezone::<T>(timestamp, tz)?;
     let res = add_months_datetime(res, months)?;
     let res = res.naive_utc();
-    T::make_value(res)
+    T::from_naive_datetime(res, None)
 }
 
 fn add_day_time<T: ArrowTimestampType>(
@@ -430,7 +435,7 @@ fn add_day_time<T: ArrowTimestampType>(
     let res = add_days_datetime(res, days)?;
     let res = res.checked_add_signed(Duration::try_milliseconds(ms as i64)?)?;
     let res = res.naive_utc();
-    T::make_value(res)
+    T::from_naive_datetime(res, None)
 }
 
 fn add_month_day_nano<T: ArrowTimestampType>(
@@ -444,7 +449,7 @@ fn add_month_day_nano<T: ArrowTimestampType>(
     let res = add_days_datetime(res, days)?;
     let res = res.checked_add_signed(Duration::nanoseconds(nanos))?;
     let res = res.naive_utc();
-    T::make_value(res)
+    T::from_naive_datetime(res, None)
 }
 
 fn subtract_year_months<T: ArrowTimestampType>(
@@ -456,7 +461,7 @@ fn subtract_year_months<T: ArrowTimestampType>(
     let res = as_datetime_with_timezone::<T>(timestamp, tz)?;
     let res = sub_months_datetime(res, months)?;
     let res = res.naive_utc();
-    T::make_value(res)
+    T::from_naive_datetime(res, None)
 }
 
 fn subtract_day_time<T: ArrowTimestampType>(
@@ -469,7 +474,7 @@ fn subtract_day_time<T: ArrowTimestampType>(
     let res = sub_days_datetime(res, days)?;
     let res = res.checked_sub_signed(Duration::try_milliseconds(ms as i64)?)?;
     let res = res.naive_utc();
-    T::make_value(res)
+    T::from_naive_datetime(res, None)
 }
 
 fn subtract_month_day_nano<T: ArrowTimestampType>(
@@ -483,7 +488,7 @@ fn subtract_month_day_nano<T: ArrowTimestampType>(
     let res = sub_days_datetime(res, days)?;
     let res = res.checked_sub_signed(Duration::nanoseconds(nanos))?;
     let res = res.naive_utc();
-    T::make_value(res)
+    T::from_naive_datetime(res, None)
 }
 
 impl TimestampSecondType {
