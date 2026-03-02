@@ -417,8 +417,7 @@ fn add_year_months<T: ArrowTimestampType>(
     let months = IntervalYearMonthType::to_months(delta);
     let res = as_datetime_with_timezone::<T>(timestamp, tz)?;
     let res = add_months_datetime(res, months)?;
-    let res = res.naive_utc();
-    T::from_naive_datetime(res, None)
+    T::from_naive_datetime(res.naive_utc(), None)
 }
 
 fn add_day_time<T: ArrowTimestampType>(
@@ -430,8 +429,7 @@ fn add_day_time<T: ArrowTimestampType>(
     let res = as_datetime_with_timezone::<T>(timestamp, tz)?;
     let res = add_days_datetime(res, days)?;
     let res = res.checked_add_signed(Duration::try_milliseconds(ms as i64)?)?;
-    let res = res.naive_utc();
-    T::from_naive_datetime(res, None)
+    T::from_naive_datetime(res.naive_utc(), None)
 }
 
 fn add_month_day_nano<T: ArrowTimestampType>(
@@ -444,8 +442,7 @@ fn add_month_day_nano<T: ArrowTimestampType>(
     let res = add_months_datetime(res, months)?;
     let res = add_days_datetime(res, days)?;
     let res = res.checked_add_signed(Duration::nanoseconds(nanos))?;
-    let res = res.naive_utc();
-    T::from_naive_datetime(res, None)
+    T::from_naive_datetime(res.naive_utc(), None)
 }
 
 fn subtract_year_months<T: ArrowTimestampType>(
@@ -456,8 +453,7 @@ fn subtract_year_months<T: ArrowTimestampType>(
     let months = IntervalYearMonthType::to_months(delta);
     let res = as_datetime_with_timezone::<T>(timestamp, tz)?;
     let res = sub_months_datetime(res, months)?;
-    let res = res.naive_utc();
-    T::from_naive_datetime(res, None)
+    T::from_naive_datetime(res.naive_utc(), None)
 }
 
 fn subtract_day_time<T: ArrowTimestampType>(
@@ -469,8 +465,7 @@ fn subtract_day_time<T: ArrowTimestampType>(
     let res = as_datetime_with_timezone::<T>(timestamp, tz)?;
     let res = sub_days_datetime(res, days)?;
     let res = res.checked_sub_signed(Duration::try_milliseconds(ms as i64)?)?;
-    let res = res.naive_utc();
-    T::from_naive_datetime(res, None)
+    T::from_naive_datetime(res.naive_utc(), None)
 }
 
 fn subtract_month_day_nano<T: ArrowTimestampType>(
@@ -483,8 +478,7 @@ fn subtract_month_day_nano<T: ArrowTimestampType>(
     let res = sub_months_datetime(res, months)?;
     let res = sub_days_datetime(res, days)?;
     let res = res.checked_sub_signed(Duration::nanoseconds(nanos))?;
-    let res = res.naive_utc();
-    T::from_naive_datetime(res, None)
+    T::from_naive_datetime(res.naive_utc(), None)
 }
 
 impl TimestampSecondType {
