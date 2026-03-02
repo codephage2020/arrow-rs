@@ -324,7 +324,7 @@ pub trait ArrowTimestampType: ArrowTemporalType<Native = i64> {
     /// Creates a ArrowTimestampType::Native from the provided [`NaiveDateTime`]
     ///
     /// See [`DataType::Timestamp`] for more information on timezone handling
-    #[deprecated(since = "59.0.0", note = "Use from_naive_datetime instead")]
+    #[deprecated(since = "58.1.0", note = "Use from_naive_datetime instead")]
     fn make_value(naive: NaiveDateTime) -> Option<i64>;
 
     /// Creates a timestamp value from a [`DateTime`] in any timezone.
@@ -359,7 +359,6 @@ pub trait ArrowTimestampType: ArrowTemporalType<Native = i64> {
 impl ArrowTimestampType for TimestampSecondType {
     const UNIT: TimeUnit = TimeUnit::Second;
 
-    #[allow(deprecated)]
     fn make_value(naive: NaiveDateTime) -> Option<i64> {
         Some(naive.and_utc().timestamp())
     }
@@ -371,7 +370,6 @@ impl ArrowTimestampType for TimestampSecondType {
 impl ArrowTimestampType for TimestampMillisecondType {
     const UNIT: TimeUnit = TimeUnit::Millisecond;
 
-    #[allow(deprecated)]
     fn make_value(naive: NaiveDateTime) -> Option<i64> {
         let utc = naive.and_utc();
         let millis = utc.timestamp().checked_mul(1_000)?;
@@ -386,7 +384,6 @@ impl ArrowTimestampType for TimestampMillisecondType {
 impl ArrowTimestampType for TimestampMicrosecondType {
     const UNIT: TimeUnit = TimeUnit::Microsecond;
 
-    #[allow(deprecated)]
     fn make_value(naive: NaiveDateTime) -> Option<i64> {
         let utc = naive.and_utc();
         let micros = utc.timestamp().checked_mul(1_000_000)?;
@@ -401,7 +398,6 @@ impl ArrowTimestampType for TimestampMicrosecondType {
 impl ArrowTimestampType for TimestampNanosecondType {
     const UNIT: TimeUnit = TimeUnit::Nanosecond;
 
-    #[allow(deprecated)]
     fn make_value(naive: NaiveDateTime) -> Option<i64> {
         let utc = naive.and_utc();
         let nanos = utc.timestamp().checked_mul(1_000_000_000)?;
